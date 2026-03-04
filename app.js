@@ -81,7 +81,7 @@
 
   function deltaClass(n) {
     if (n == null || isNaN(n)) return '';
-    return n >= 0 ? 'positive' : 'negative';
+    return n >= 0 ? 'pos' : 'neg';
   }
 
   // ============================================
@@ -984,7 +984,7 @@
       if (prevYes != null && yesProb != null) {
         var diff = parseFloat(yesProb) - prevYes;
         if (Math.abs(diff) >= 0.5) {
-          trendHtml = '<span class="pm-trend ' + (diff > 0 ? 'positive' : 'negative') + '">' + (diff > 0 ? '▲' : '▼') + ' ' + Math.abs(diff).toFixed(1) + '%</span>';
+          trendHtml = '<span class="pm-trend ' + (diff > 0 ? 'pos' : 'neg') + '">' + (diff > 0 ? '▲' : '▼') + ' ' + Math.abs(diff).toFixed(1) + '%</span>';
         }
       }
       if (yesProb != null) state.polymarketLastValues[m.id] = parseFloat(yesProb);
@@ -1405,6 +1405,270 @@
   }
 
   // ============================================
+  // DERIVATIVES (F09)
+  // ============================================
+  async function loadDerivatives() {
+    try {
+      var resp = await fetch(CGI_BIN + '/derivatives.py');
+      if (!resp.ok) throw new Error('Derivatives fetch failed: ' + resp.status);
+      var data = await resp.json();
+      renderDerivatives(data);
+    } catch (e) {
+      console.error('Derivatives load error:', e);
+    }
+  }
+
+  function renderDerivatives(data) {
+    var grid = $('#derivGrid');
+    if (!grid || !data) return;
+
+    var cards = [];
+
+    // Funding Rate (avg across exchanges)
+    if (data.funding) {
+      var avg = data.funding.avg;
+      var annualized = avg != null ? (avg * 365 * 3 * 100).toFixed(2) : null;
+      cards.push({ label: 'FUNDING RATE', value: avg != null ? (avg * 100).toFixed(4) + '%' : '--', sub: annualized ? 'Ann. ' + annualized + '%' : '', cls: avg >= 0 ? 'pos' : 'neg' });
+
+      // Per-exchange
+      ['binance', 'okx', 'deribit', 'bybit'].forEach(function(ex) {
+        var d = data.funding[ex];
+        if (d) {
+          var r = d.rate;
+          cards.push({ label: ex.toUpperCase() + ' FUNDING', value: (r * 100).toFixed(4) + '%', sub: d.annualized ? 'Ann. ' + d.annualized.toFixed(2) + '%' : '', cls: r >= 0 ? 'pos' : 'neg' });
+        }
+      });
+    }
+
+    // Open Interest
+    if (data.open_interest) {
+      cards.push({ label: 'TOTAL OPEN INTEREST', value: formatCompact(data.open_interest.total_usd), sub: '', cls: '' });
+      if (data.open_interest.binance) cards.push({ label: 'BINANCE OI', value: formatCompact(data.open_interest.binance.usd), sub: '', cls: '' });
+      if (data.open_interest.bybit) cards.push({ label: 'BYBIT OI', value: formatCompact(data.open_interest.bybit.usd), sub: '', cls: '' });
+    }
+
+    // Basis
+    if (data.basis) {
+      cards.push({ label: 'BASIS', value: data.basis.basis_pct.toFixed(3) + '%', sub: 'Ann. ' + data.basis.annualized_basis.toFixed(1) + '%', cls: data.basis.basis_pct >= 0 ? 'pos' : 'neg' });
+    }
+
+    // Liquidations
+    if (data.liquidations_24h) {
+      var liq = data.liquidations_24h;
+      cards.push({ label: 'LONGS LIQUIDATED 24H', value: formatCompact(liq.long_usd), sub: '', cls: 'neg' });
+      cards.push({ label: 'SHORTS LIQUIDATED 24H', value: formatCompact(liq.short_usd), sub: '', cls: 'pos' });
+    }
+
+    // Long/Short Ratio
+    if (data.long_short_ratio) {
+      var ls = data.long_short_ratio;
+      cards.push({ label: 'LONG/SHORT RATIO', value: ls.ratio.toFixed(3), sub: 'L ' + ls.long_pct.toFixed(1) + '% / S ' + ls.short_pct.toFixed(1) + '%', cls: ls.ratio >= 1 ? 'pos' : 'neg' });
+    }
+
+    grid.innerHTML = cards.map(function(c) {
+      return '<div class="deriv-card">' +
+        '<div class="deriv-label">' + c.label + '</div>' +
+        '<div class="deriv-value ' + c.cls + '">' + c.value + '</div>' +
+        (c.sub ? '<div class="deriv-sub">' + c.sub + '</div>' : '') +
+        '</div>';
+    }).join('');
+  }
+
+  // ============================================
+  // BTC UP OR DOWN (F07)
+  // ============================================
+  var updownInterval = null;
+
+  async function loadUpdown() {
+    try {
+      var resp = await fetch(CGI_BIN + '/updown.py');
+      if (!resp.ok) throw new Error('Updown fetch failed: ' + resp.status);
+      var data = await resp.json();
+      renderUpdown(data);
+    } catch (e) {
+      console.error('Updown load error:', e);
+    }
+  }
+
+  function renderUpdown(data) {
+    if (!data || !data.active) return;
+
+    var refEl = $('#updownRefPrice');
+    var timerEl = $('#updownTimer');
+    var upPctEl = $('#updownUpPct');
+    var downPctEl = $('#updownDownPct');
+    var barUp = $('#updownBarUp');
+    var barDown = $('#updownBarDown');
+    var profitUp = $('#updownProfitUp');
+    var profitDown = $('#updownProfitDown');
+    var windowEl = $('#updownWindow');
+    var linkEl = $('#updownLink');
+
+    if (refEl) refEl.textContent = '$' + formatPrice(data.ref_price, 2);
+    if (upPctEl) upPctEl.textContent = data.up_pct.toFixed(1) + '%';
+    if (downPctEl) downPctEl.textContent = data.down_pct.toFixed(1) + '%';
+    if (barUp) barUp.style.width = data.up_pct + '%';
+    if (barDown) barDown.style.width = data.down_pct + '%';
+    if (profitUp) profitUp.textContent = data.payout_up.toFixed(2) + 'x';
+    if (profitDown) profitDown.textContent = data.payout_down.toFixed(2) + 'x';
+    if (windowEl) windowEl.textContent = data.time_label;
+    if (linkEl && data.url) linkEl.href = data.url;
+
+    // Countdown timer
+    if (updownInterval) clearInterval(updownInterval);
+    var remaining = data.remaining_seconds;
+    function tick() {
+      if (remaining <= 0) {
+        if (timerEl) timerEl.textContent = 'SETTLED';
+        clearInterval(updownInterval);
+        setTimeout(loadUpdown, 5000);
+        return;
+      }
+      var m = Math.floor(remaining / 60);
+      var s = remaining % 60;
+      if (timerEl) timerEl.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+      remaining--;
+    }
+    tick();
+    updownInterval = setInterval(tick, 1000);
+  }
+
+  // ============================================
+  // EVENT CALENDAR (F14)
+  // ============================================
+  var calendarData = [];
+  var calendarFilter = 'all';
+
+  async function loadCalendar() {
+    try {
+      var resp = await fetch(CGI_BIN + '/btc_calendar.py');
+      if (!resp.ok) throw new Error('Calendar fetch failed: ' + resp.status);
+      var data = await resp.json();
+      calendarData = data.events || [];
+      renderCalendar();
+    } catch (e) {
+      console.error('Calendar load error:', e);
+    }
+  }
+
+  function renderCalendar() {
+    var list = $('#calList');
+    if (!list) return;
+
+    var filtered = calendarFilter === 'all'
+      ? calendarData
+      : calendarData.filter(function(ev) { return ev.category === calendarFilter; });
+
+    // Sort: upcoming first, then past (newest past first)
+    var now = Date.now() / 1000;
+    filtered.sort(function(a, b) {
+      var aFuture = a.timestamp >= now ? 0 : 1;
+      var bFuture = b.timestamp >= now ? 0 : 1;
+      if (aFuture !== bFuture) return aFuture - bFuture;
+      return aFuture === 0 ? a.timestamp - b.timestamp : b.timestamp - a.timestamp;
+    });
+
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="news-loading">No events</div>';
+      return;
+    }
+
+    list.innerHTML = filtered.map(function(ev) {
+      var impactCls = ev.impact || 'medium';
+      var catCls = ev.category === 'crypto' ? 'crypto' : (ev.category === 'etf' ? 'crypto' : '');
+      var pastCls = ev.is_past ? ' cal-past' : '';
+      return '<div class="cal-item' + pastCls + '">' +
+        '<div class="cal-date">' + ev.date + '</div>' +
+        '<div class="cal-content">' +
+          '<div class="cal-title">' + ev.title + '</div>' +
+          '<div class="cal-meta">' +
+            '<span class="cal-impact ' + impactCls + ' ' + catCls + '">' + ev.impact.toUpperCase() + '</span>' +
+            '<span class="cal-category">' + ev.category + '</span>' +
+            (ev.description ? '<span class="cal-desc">' + ev.description + '</span>' : '') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function initCalendarTabs() {
+    var tabContainer = $('#calTabs');
+    if (!tabContainer) return;
+    tabContainer.addEventListener('click', function(e) {
+      var btn = e.target.closest('.news-tab');
+      if (!btn) return;
+      calendarFilter = btn.dataset.cal || 'all';
+      tabContainer.querySelectorAll('.news-tab').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      renderCalendar();
+    });
+  }
+
+  // ============================================
+  // ADDRESS INSPECTOR (F15)
+  // ============================================
+  function initAddressInspector() {
+    var panel = $('#addressPanel');
+    var input = $('#addrInput');
+    var btn = $('#addrGoBtn');
+    var result = $('#addrResult');
+    var closeBtn = $('#addressCloseBtn');
+
+    // Show panel when Address nav is clicked
+    var addrNav = document.querySelector('[data-nav="address"]');
+    if (addrNav) {
+      addrNav.addEventListener('click', function() {
+        if (panel) panel.style.display = '';
+        if (input) input.focus();
+      });
+    }
+    if (closeBtn && panel) {
+      closeBtn.addEventListener('click', function() { panel.style.display = 'none'; });
+    }
+
+    function doLookup() {
+      var q = input ? input.value.trim() : '';
+      if (!q || !result) return;
+      result.innerHTML = '<div class="news-loading"><span class="spinner"></span>Inspecting...</div>';
+      fetch(CGI_BIN + '/address.py?q=' + encodeURIComponent(q))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.error) {
+            result.innerHTML = '<div class="addr-error">' + data.error + '</div>';
+            return;
+          }
+          var html = '';
+          if (data.type === 'address' && data.address) {
+            var a = data.address;
+            html = '<div class="deriv-grid">' +
+              '<div class="deriv-card"><div class="deriv-label">ADDRESS</div><div class="deriv-value" style="font-size:0.65rem;word-break:break-all">' + a.address + '</div></div>' +
+              '<div class="deriv-card"><div class="deriv-label">BALANCE</div><div class="deriv-value">' + (a.funded_txo_sum != null ? ((a.funded_txo_sum - (a.spent_txo_sum || 0)) / 1e8).toFixed(8) + ' BTC' : '--') + '</div></div>' +
+              '<div class="deriv-card"><div class="deriv-label">TX COUNT</div><div class="deriv-value">' + (a.tx_count || 0) + '</div></div>' +
+              '<div class="deriv-card"><div class="deriv-label">TOTAL RECEIVED</div><div class="deriv-value">' + (a.funded_txo_sum != null ? (a.funded_txo_sum / 1e8).toFixed(8) + ' BTC' : '--') + '</div></div>' +
+              '</div>';
+          } else if (data.type === 'tx' && data.tx) {
+            var tx = data.tx;
+            html = '<div class="deriv-grid">' +
+              '<div class="deriv-card"><div class="deriv-label">TXID</div><div class="deriv-value" style="font-size:0.6rem;word-break:break-all">' + tx.txid + '</div></div>' +
+              '<div class="deriv-card"><div class="deriv-label">STATUS</div><div class="deriv-value">' + (tx.status && tx.status.confirmed ? 'Confirmed' : 'Unconfirmed') + '</div></div>' +
+              '<div class="deriv-card"><div class="deriv-label">SIZE</div><div class="deriv-value">' + (tx.size || '--') + ' bytes</div></div>' +
+              '<div class="deriv-card"><div class="deriv-label">FEE</div><div class="deriv-value">' + (tx.fee != null ? tx.fee + ' sat' : '--') + '</div></div>' +
+              '</div>';
+          } else {
+            html = '<pre style="color:var(--color-text-faint);font-size:0.7rem;white-space:pre-wrap">' + JSON.stringify(data, null, 2) + '</pre>';
+          }
+          result.innerHTML = html;
+        })
+        .catch(function(e) {
+          result.innerHTML = '<div class="addr-error">Error: ' + e.message + '</div>';
+        });
+    }
+
+    if (btn) btn.addEventListener('click', doLookup);
+    if (input) input.addEventListener('keydown', function(e) { if (e.key === 'Enter') doLookup(); });
+  }
+
+  // ============================================
   // INIT
   // ============================================
   function init() {
@@ -1422,6 +1686,11 @@
     loadMacro();
     loadVolatility();
     loadOnChain();
+    loadDerivatives();
+    loadUpdown();
+    loadCalendar();
+    initCalendarTabs();
+    initAddressInspector();
 
     // Periodic refreshes
     setInterval(loadWatchlist, 30000);
@@ -1429,6 +1698,9 @@
     setInterval(loadPolymarket, 60000);
     setInterval(loadMacro, 300000);
     setInterval(loadVolatility, 60000);
+    setInterval(loadDerivatives, 30000);
+    setInterval(loadUpdown, 10000);
+    setInterval(loadCalendar, 600000);
   }
 
   if (document.readyState === 'loading') {

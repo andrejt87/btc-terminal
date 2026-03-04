@@ -521,6 +521,18 @@ input, textarea {
   min-height: 0;
 }
 
+/* Allow scrollable content in panels with lists */
+.news-panel .panel-body,
+.calendar-panel .panel-body,
+.watchlist-panel .panel-body,
+.derivatives-panel .panel-body,
+.address-panel .panel-body {
+  overflow: visible;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
 .panel-close-btn {
   margin-left: auto;
   width: 20px;
@@ -1214,6 +1226,8 @@ input, textarea {
   height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .news-item {
@@ -1455,6 +1469,22 @@ input, textarea {
   grid-area: cal;
 }
 
+.cal-past {
+  opacity: 0.45;
+}
+
+.cal-desc {
+  font-size: 0.6rem;
+  color: var(--color-text-faint);
+}
+
+.cal-category {
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+  letter-spacing: 0.05em;
+}
+
 .cal-list {
   display: flex;
   flex-direction: column;
@@ -1462,6 +1492,8 @@ input, textarea {
   height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .cal-item {
