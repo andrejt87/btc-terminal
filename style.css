@@ -426,7 +426,7 @@ html, body {
   z-index: 25;
   width: var(--sidebar-width);
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 .sidebar-logo {
@@ -509,7 +509,7 @@ html, body {
   grid-row: 3;
   overflow-y: auto;
   overflow-x: hidden;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   padding: var(--space-3);
 }
 
@@ -861,7 +861,7 @@ html, body {
 .orderbook-asks,
 .orderbook-bids {
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 .orderbook-asks {
@@ -2075,7 +2075,7 @@ html, body {
   gap: 1px;
   max-height: 440px;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 .news-item {
@@ -2404,7 +2404,7 @@ html, body {
 
 .polymarket-panel .panel-body {
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   flex: 1;
 }
 
@@ -3046,7 +3046,7 @@ html, body {
   flex-direction: column;
   max-height: 360px;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 .cal-item {
@@ -3227,7 +3227,7 @@ html, body {
   gap: 1px;
   max-height: 280px;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 .addr-tx-item {
@@ -3410,7 +3410,7 @@ html, body {
   padding: var(--space-3);
   max-height: 400px;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 .nb-entry {
