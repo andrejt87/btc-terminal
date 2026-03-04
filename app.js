@@ -238,12 +238,11 @@
     for (var i = 0; i < filtered.length; i++) {
       var item = filtered[i];
       html += '<a class="news-item" href="' + escapeHtml(item.link) + '" target="_blank" rel="noopener noreferrer">'
-        + '<span class="news-item-time">' + formatNewsTime(item.timestamp) + '</span>'
-        + '<div class="news-item-content">'
-          + '<div class="news-item-title">' + escapeHtml(item.title) + '</div>'
-          + (item.summary ? '<div class="news-item-summary">' + escapeHtml(item.summary) + '</div>' : '')
+        + '<div class="news-item-header">'
+          + '<span class="news-source-badge">' + escapeHtml(item.source) + '</span>'
+          + '<span class="news-time">' + formatNewsTime(item.timestamp) + '</span>'
         + '</div>'
-        + '<span class="news-item-source">' + escapeHtml(item.source) + '</span>'
+        + '<div class="news-title">' + escapeHtml(item.title) + '</div>'
       + '</a>';
     }
     list.innerHTML = html;
@@ -997,28 +996,34 @@
       return;
     }
 
-    grid.innerHTML = filtered.map(function(m, idx) {
+    grid.innerHTML = filtered.map(function(m) {
       var yesProb = m.yes_prob != null ? (m.yes_prob * 100).toFixed(1) : null;
+      var noProb = yesProb != null ? (100 - parseFloat(yesProb)).toFixed(1) : null;
       var vol = m.volume != null ? formatCompact(m.volume) : '—';
       var liq = m.liquidity != null ? formatCompact(m.liquidity) : '—';
 
-      var probHtml = '';
+      var outcomesHtml = '';
       if (yesProb != null) {
         var pct = parseFloat(yesProb);
-        var barColor = pct >= 60 ? '#22c55e' : pct >= 40 ? '#f59e0b' : '#ef4444';
-        probHtml = '<div class="pm-prob-bar"><div class="pm-prob-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>'
-          + '<div class="pm-prob-labels"><span class="pm-yes">YES ' + yesProb + '%</span><span class="pm-no">NO ' + (100 - pct).toFixed(1) + '%</span></div>';
+        outcomesHtml = '<div class="pm-outcomes">'
+          + '<div class="pm-outcome-row yes"><span class="pm-outcome-label">YES</span>'
+          + '<div class="pm-outcome-bar-wrap"><div class="pm-outcome-bar" style="width:' + pct + '%"></div></div>'
+          + '<span class="pm-outcome-pct">' + yesProb + '%</span></div>'
+          + '<div class="pm-outcome-row no"><span class="pm-outcome-label">NO</span>'
+          + '<div class="pm-outcome-bar-wrap"><div class="pm-outcome-bar" style="width:' + noProb + '%"></div></div>'
+          + '<span class="pm-outcome-pct">' + noProb + '%</span></div>'
+          + '</div>';
       }
 
-      var horizonBadge = '<span class="pm-horizon-badge pm-h-' + m.horizon + '">' + m.horizon.toUpperCase() + '</span>';
-
-      return '<div class="pm-card">'
-        + '<div class="pm-card-header">'
-          + '<div class="pm-question">' + escapeHtml(m.question) + '</div>'
-          + '<div class="pm-meta">' + horizonBadge + '</div>'
+      return '<div class="pm-market-card">'
+        + '<div class="pm-market-header">'
+          + '<div class="pm-market-question">' + escapeHtml(m.question) + '</div>'
+          + '<div class="pm-market-meta">'
+            + '<span class="pm-market-volume">Vol ' + vol + '</span>'
+            + '<span class="pm-market-expires">' + m.horizon.toUpperCase() + '</span>'
+          + '</div>'
         + '</div>'
-        + probHtml
-        + '<div class="pm-stats"><span>Vol: ' + vol + '</span><span>Liq: ' + liq + '</span></div>'
+        + outcomesHtml
       + '</div>';
     }).join('');
   }
