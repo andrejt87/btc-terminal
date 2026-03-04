@@ -844,21 +844,22 @@
     var maxBid = bids.reduce(function(m, b) { return Math.max(m, parseFloat(b[1])); }, 0);
     var maxVol = Math.max(maxAsk, maxBid);
 
-    var asksEl = $('#orderBookAsks');
-    var bidsEl = $('#orderBookBids');
+    var asksEl = $('#asksBody');
+    var bidsEl = $('#bidsBody');
+    if (!asksEl || !bidsEl) return;
 
     asksEl.innerHTML = asks.map(function(a) {
       var price = parseFloat(a[0]);
       var vol = parseFloat(a[1]);
-      var pct = maxVol > 0 ? (vol / maxVol * 100).toFixed(1) : 0;
-      return '<div class="ob-row ask"><span class="ob-price">' + formatPrice(price, 2) + '</span><span class="ob-vol">' + vol.toFixed(4) + '</span><div class="ob-bar" style="width:' + pct + '%"></div></div>';
+      var total = price * vol;
+      return '<tr class="ob-row ask"><td class="ob-price">' + formatPrice(price, 2) + '</td><td class="ob-vol">' + vol.toFixed(4) + '</td><td>' + formatCompact(total) + '</td></tr>';
     }).join('');
 
     bidsEl.innerHTML = bids.map(function(b) {
       var price = parseFloat(b[0]);
       var vol = parseFloat(b[1]);
-      var pct = maxVol > 0 ? (vol / maxVol * 100).toFixed(1) : 0;
-      return '<div class="ob-row bid"><span class="ob-price">' + formatPrice(price, 2) + '</span><span class="ob-vol">' + vol.toFixed(4) + '</span><div class="ob-bar" style="width:' + pct + '%"></div></div>';
+      var total = price * vol;
+      return '<tr class="ob-row bid"><td class="ob-price">' + formatPrice(price, 2) + '</td><td class="ob-vol">' + vol.toFixed(4) + '</td><td>' + formatCompact(total) + '</td></tr>';
     }).join('');
 
     // Spread
@@ -911,6 +912,15 @@
         + '<td>' + formatCompact(coin.total_volume) + '</td>'
         + '</tr>';
     }).join('');
+
+    // Populate KPIs from BTC data
+    var btc = state.watchlistData.find(function(c) { return c.id === 'bitcoin'; });
+    if (btc) {
+      var kpiAth = $('#kpiAth'); if (kpiAth) kpiAth.textContent = '$' + formatPrice(btc.ath, 0);
+      var kpiAthD = $('#kpiAthDelta'); if (kpiAthD) { kpiAthD.textContent = formatPct(btc.ath_change_percentage); kpiAthD.className = 'kpi-delta ' + deltaClass(btc.ath_change_percentage); }
+      var kpiSupply = $('#kpiSupply'); if (kpiSupply) kpiSupply.textContent = formatSupply(btc.circulating_supply);
+      var kpiChange = $('#kpiChange'); if (kpiChange) { kpiChange.textContent = formatPct(btc.price_change_percentage_24h); kpiChange.className = 'kpi-value ' + deltaClass(btc.price_change_percentage_24h); }
+    }
   }
 
   // Sort headers
@@ -948,24 +958,39 @@
   }
 
   function renderPolymarketError(msg) {
-    var el = $('#polymarketGrid');
+    var el = $('#pmMarkets');
     if (el) el.innerHTML = '<div class="pm-error">Polymarket data unavailable: ' + escapeHtml(msg) + '</div>';
   }
 
   function renderPolymarket() {
-    var grid = $('#polymarketGrid');
+    var grid = $('#pmMarkets');
     if (!grid || !state.polymarketData) return;
 
-    var markets = state.polymarketData.markets || [];
+    var horizons = state.polymarketData.horizons || {};
     var filter = state.polymarketFilter;
 
-    var filtered = markets.filter(function(m) {
-      if (filter === 'all') return true;
-      if (filter === 'crypto') return (m.tags || []).some(function(t) { return t.toLowerCase().indexOf('crypto') !== -1 || t.toLowerCase().indexOf('bitcoin') !== -1 || t.toLowerCase().indexOf('ethereum') !== -1; });
-      if (filter === 'btc') return (m.tags || []).some(function(t) { return t.toLowerCase().indexOf('bitcoin') !== -1 || t.toLowerCase().indexOf('btc') !== -1; })
-        || m.question.toLowerCase().indexOf('bitcoin') !== -1 || m.question.toLowerCase().indexOf('btc') !== -1;
-      return true;
+    // Flatten all horizon groups into a flat list of displayable items
+    var allItems = [];
+    ['short', 'mid', 'long'].forEach(function(h) {
+      (horizons[h] || []).forEach(function(group) {
+        // Each group has sub-markets with individual questions
+        (group.markets || []).forEach(function(m) {
+          allItems.push({
+            id: group.id + '_' + (m.conditionId || m.question),
+            question: m.question,
+            label: group.label || group.title,
+            horizon: h,
+            yes_prob: m.lastTradePrice,
+            volume: group.totalVolume,
+            liquidity: group.liquidity,
+            url: group.url,
+            slug: group.slug
+          });
+        });
+      });
     });
+
+    var filtered = filter === 'all' ? allItems : allItems.filter(function(m) { return m.horizon === filter; });
 
     if (!filtered.length) {
       grid.innerHTML = '<div class="pm-empty">No markets match this filter.</div>';
@@ -974,51 +999,28 @@
 
     grid.innerHTML = filtered.map(function(m, idx) {
       var yesProb = m.yes_prob != null ? (m.yes_prob * 100).toFixed(1) : null;
-      var noProb = m.no_prob != null ? (m.no_prob * 100).toFixed(1) : null;
       var vol = m.volume != null ? formatCompact(m.volume) : '—';
       var liq = m.liquidity != null ? formatCompact(m.liquidity) : '—';
-
-      // Trend indicator
-      var prevYes = state.polymarketLastValues[m.id];
-      var trendHtml = '';
-      if (prevYes != null && yesProb != null) {
-        var diff = parseFloat(yesProb) - prevYes;
-        if (Math.abs(diff) >= 0.5) {
-          trendHtml = '<span class="pm-trend ' + (diff > 0 ? 'pos' : 'neg') + '">' + (diff > 0 ? '▲' : '▼') + ' ' + Math.abs(diff).toFixed(1) + '%</span>';
-        }
-      }
-      if (yesProb != null) state.polymarketLastValues[m.id] = parseFloat(yesProb);
 
       var probHtml = '';
       if (yesProb != null) {
         var pct = parseFloat(yesProb);
         var barColor = pct >= 60 ? '#22c55e' : pct >= 40 ? '#f59e0b' : '#ef4444';
         probHtml = '<div class="pm-prob-bar"><div class="pm-prob-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>'
-          + '<div class="pm-prob-labels"><span class="pm-yes">YES ' + yesProb + '%</span>' + (noProb ? '<span class="pm-no">NO ' + noProb + '%</span>' : '') + '</div>';
-      } else {
-        probHtml = '<div class="pm-no-prob">Multi-outcome</div>';
+          + '<div class="pm-prob-labels"><span class="pm-yes">YES ' + yesProb + '%</span><span class="pm-no">NO ' + (100 - pct).toFixed(1) + '%</span></div>';
       }
 
-      return '<div class="pm-card" data-market-idx="' + idx + '">'
+      var horizonBadge = '<span class="pm-horizon-badge pm-h-' + m.horizon + '">' + m.horizon.toUpperCase() + '</span>';
+
+      return '<div class="pm-card">'
         + '<div class="pm-card-header">'
           + '<div class="pm-question">' + escapeHtml(m.question) + '</div>'
-          + '<div class="pm-meta">' + (m.end_date ? '<span class="pm-end">⏰ ' + new Date(m.end_date).toLocaleDateString() + '</span>' : '') + trendHtml + '</div>'
+          + '<div class="pm-meta">' + horizonBadge + '</div>'
         + '</div>'
         + probHtml
         + '<div class="pm-stats"><span>Vol: ' + vol + '</span><span>Liq: ' + liq + '</span></div>'
       + '</div>';
     }).join('');
-
-    // Click handlers for PM cards — open history chart
-    grid.querySelectorAll('.pm-card').forEach(function(card) {
-      card.addEventListener('click', function() {
-        var idx = parseInt(card.dataset.marketIdx, 10);
-        var markets = (state.polymarketData && state.polymarketData.markets) || [];
-        if (!isNaN(idx) && markets[idx]) {
-          openPMHistoryChart(markets[idx]);
-        }
-      });
-    });
   }
 
   // ============================================
@@ -1241,12 +1243,12 @@
 
   // Polymarket filter tabs
   (function initPolymarketTabs() {
-    var tabs = $$('#polymarketTabs .pm-tab');
+    var tabs = $$('#pmHorizonTabs .pm-tab');
     tabs.forEach(function(tab) {
       tab.addEventListener('click', function() {
         tabs.forEach(function(t) { t.classList.remove('active'); });
         tab.classList.add('active');
-        state.polymarketFilter = tab.dataset.filter || 'all';
+        state.polymarketFilter = tab.dataset.horizon || 'all';
         renderPolymarket();
       });
     });
@@ -1267,34 +1269,45 @@
   }
 
   function renderMacro(data) {
-    var rows = [
-      { id: 'macroDxy', key: 'dxy' },
-      { id: 'macroGold', key: 'gold' },
-      { id: 'macroSpy', key: 'spy' },
-      { id: 'macroVix', key: 'vix' },
-      { id: 'macroUs10y', key: 'us10y' },
-      { id: 'macroFedRate', key: 'fed_rate' },
-      { id: 'macroM2', key: 'm2' },
-      { id: 'macroCpi', key: 'cpi' },
-    ];
+    var grid = $('#macroGrid');
+    if (!grid || !data) return;
 
-    rows.forEach(function(row) {
-      var item = data[row.key];
-      if (!item) return;
-      var el = $('#' + row.id);
-      if (!el) return;
+    var cards = [];
+    // Fear & Greed
+    if (data.fear_greed) {
+      var fg = data.fear_greed;
+      var fgColor = fg.value < 25 ? '#ef4444' : fg.value < 45 ? '#f97316' : fg.value < 55 ? '#eab308' : fg.value < 75 ? '#84cc16' : '#22c55e';
+      cards.push({ label: 'FEAR & GREED', value: fg.value + ' — ' + fg.label, cls: '', color: fgColor });
+    }
+    // Global market data
+    if (data.global) {
+      var g = data.global;
+      cards.push({ label: 'TOTAL CRYPTO MCAP', value: formatCompact(g.total_market_cap_usd), sub: deltaArrow(g.market_cap_change_24h) + ' ' + Math.abs(g.market_cap_change_24h || 0).toFixed(2) + '%', cls: deltaClass(g.market_cap_change_24h) });
+      cards.push({ label: '24H VOLUME', value: formatCompact(g.total_volume_24h_usd), cls: '' });
+      cards.push({ label: 'BTC DOMINANCE', value: (g.btc_dominance || 0).toFixed(1) + '%', cls: '' });
+      cards.push({ label: 'ETH DOMINANCE', value: (g.eth_dominance || 0).toFixed(1) + '%', cls: '' });
+      cards.push({ label: 'ACTIVE CRYPTOS', value: (g.active_cryptos || 0).toLocaleString(), cls: '' });
 
-      var valEl = el.querySelector('.macro-value');
-      var chgEl = el.querySelector('.macro-change');
-      var srcEl = el.querySelector('.macro-source');
+      // Populate KPIs from global data
+      var kpiMcap = $('#kpiMcap'); if (kpiMcap) kpiMcap.textContent = formatCompact(g.total_market_cap_usd);
+      var kpiVol = $('#kpiVol'); if (kpiVol) kpiVol.textContent = formatCompact(g.total_volume_24h_usd);
+      var kpiDom = $('#kpiDom'); if (kpiDom) kpiDom.textContent = (g.btc_dominance || 0).toFixed(1) + '%';
+      var kpiMcapD = $('#kpiMcapDelta'); if (kpiMcapD) { kpiMcapD.textContent = formatPct(g.market_cap_change_24h); kpiMcapD.className = 'kpi-delta ' + deltaClass(g.market_cap_change_24h); }
+    }
+    // Cross asset
+    if (data.cross_asset) {
+      var ca = data.cross_asset;
+      if (ca.gold_proxy_price) cards.push({ label: 'GOLD (' + ca.gold_proxy_symbol + ')', value: '$' + ca.gold_proxy_price.toFixed(2), sub: deltaArrow(ca.gold_proxy_change_24h) + ' ' + Math.abs(ca.gold_proxy_change_24h || 0).toFixed(2) + '%', cls: deltaClass(ca.gold_proxy_change_24h) });
+      if (ca.eth_btc_ratio) cards.push({ label: 'ETH/BTC', value: ca.eth_btc_ratio.toFixed(6), cls: '' });
+    }
 
-      if (valEl) valEl.textContent = item.value != null ? (typeof item.value === 'number' ? item.value.toFixed(item.decimals || 2) : item.value) : '—';
-      if (chgEl && item.change != null) {
-        chgEl.textContent = deltaArrow(item.change) + ' ' + Math.abs(item.change).toFixed(2) + '%';
-        chgEl.className = 'macro-change ' + deltaClass(item.change);
-      }
-      if (srcEl && item.source) srcEl.textContent = item.source;
-    });
+    grid.innerHTML = cards.map(function(c) {
+      return '<div class="deriv-card">' +
+        '<div class="deriv-label">' + c.label + '</div>' +
+        '<div class="deriv-value' + (c.color ? '" style="color:' + c.color : '') + '">' + c.value + '</div>' +
+        (c.sub ? '<div class="deriv-sub ' + (c.cls || '') + '">' + c.sub + '</div>' : '') +
+        '</div>';
+    }).join('');
   }
 
   // ============================================
@@ -1312,53 +1325,38 @@
   }
 
   function renderVolatility(data) {
-    if (!data) return;
+    var grid = $('#volGrid');
+    if (!grid || !data) return;
 
-    function setVal(id, val, pct, clsKey) {
-      var el = $('#' + id);
-      if (!el) return;
-      var valEl = el.querySelector('.vol-value');
-      var pctEl = el.querySelector('.vol-pct');
-      if (valEl) valEl.textContent = val != null ? val : '—';
-      if (pctEl && pct != null) {
-        pctEl.textContent = deltaArrow(pct) + ' ' + Math.abs(pct).toFixed(2) + '%';
-        pctEl.className = 'vol-pct ' + deltaClass(pct);
-      }
+    var cards = [];
+    // Realized vol
+    if (data.realized) {
+      cards.push({ label: 'REALIZED VOL 7D', value: data.realized.vol_7d.toFixed(1) + '%' });
+      cards.push({ label: 'REALIZED VOL 30D', value: data.realized.vol_30d.toFixed(1) + '%' });
+      cards.push({ label: 'REALIZED VOL 90D', value: data.realized.vol_90d.toFixed(1) + '%' });
+    }
+    // Implied vol
+    if (data.implied) {
+      cards.push({ label: 'ATM IMPLIED VOL', value: data.implied.atm_iv.toFixed(1) + '%' });
+      cards.push({ label: 'IV RANK', value: data.implied.iv_rank.toFixed(1) + '%' });
+      cards.push({ label: 'PUT/CALL RATIO', value: data.implied.put_call_ratio.toFixed(4) });
+      cards.push({ label: 'OPTION COUNT', value: data.implied.option_count.toLocaleString() });
+    }
+    // HV/IV ratio
+    if (data.hv_iv_ratio != null) {
+      cards.push({ label: 'HV/IV RATIO', value: data.hv_iv_ratio.toFixed(2) });
+    }
+    // Deribit index
+    if (data.deribit_index != null) {
+      cards.push({ label: 'DERIBIT INDEX', value: '$' + formatPrice(data.deribit_index, 2) });
     }
 
-    if (data.realized_vol_7d != null) setVal('volRv7d', data.realized_vol_7d.toFixed(1) + '%', data.realized_vol_7d_chg);
-    if (data.realized_vol_30d != null) setVal('volRv30d', data.realized_vol_30d.toFixed(1) + '%', data.realized_vol_30d_chg);
-    if (data.implied_vol != null) setVal('volIv', data.implied_vol.toFixed(1) + '%', data.implied_vol_chg);
-    if (data.fear_greed != null) {
-      var fgEl = $('#volFearGreed');
-      if (fgEl) {
-        var valEl = fgEl.querySelector('.vol-value');
-        var lblEl = fgEl.querySelector('.fg-label');
-        var meterEl = fgEl.querySelector('.fg-meter-fill');
-        if (valEl) valEl.textContent = data.fear_greed;
-        if (lblEl) lblEl.textContent = data.fear_greed_label || '';
-        if (meterEl) {
-          meterEl.style.width = data.fear_greed + '%';
-          var fg = parseInt(data.fear_greed);
-          meterEl.style.background = fg < 25 ? '#ef4444' : fg < 45 ? '#f97316' : fg < 55 ? '#eab308' : fg < 75 ? '#84cc16' : '#22c55e';
-        }
-      }
-    }
-    if (data.funding_rate != null) {
-      var frEl = $('#volFundingRate');
-      if (frEl) {
-        var valEl = frEl.querySelector('.vol-value');
-        if (valEl) valEl.textContent = (data.funding_rate >= 0 ? '+' : '') + data.funding_rate.toFixed(4) + '%';
-        valEl.className = 'vol-value ' + deltaClass(data.funding_rate);
-      }
-    }
-    if (data.open_interest != null) {
-      var oiEl = $('#volOI');
-      if (oiEl) {
-        var valEl = oiEl.querySelector('.vol-value');
-        if (valEl) valEl.textContent = formatCompact(data.open_interest);
-      }
-    }
+    grid.innerHTML = cards.map(function(c) {
+      return '<div class="deriv-card">' +
+        '<div class="deriv-label">' + c.label + '</div>' +
+        '<div class="deriv-value">' + c.value + '</div>' +
+        '</div>';
+    }).join('');
   }
 
   // ============================================
@@ -1376,32 +1374,42 @@
   }
 
   function renderOnChain(data) {
-    if (!data) return;
-    var fields = [
-      { id: 'ocHashRate', key: 'hash_rate', fmt: function(v) { return (v / 1e18).toFixed(2) + ' EH/s'; } },
-      { id: 'ocDifficulty', key: 'difficulty', fmt: function(v) { return (v / 1e12).toFixed(2) + 'T'; } },
-      { id: 'ocMempoolSize', key: 'mempool_size', fmt: function(v) { return v.toLocaleString() + ' txs'; } },
-      { id: 'ocAvgFee', key: 'avg_fee', fmt: function(v) { return v.toFixed(1) + ' sat/vB'; } },
-      { id: 'ocBlockTime', key: 'block_time', fmt: function(v) { return v.toFixed(1) + ' min'; } },
-      { id: 'ocActiveAddr', key: 'active_addresses', fmt: function(v) { return (v / 1e3).toFixed(1) + 'K'; } },
-      { id: 'ocTxCount', key: 'tx_count_24h', fmt: function(v) { return (v / 1e3).toFixed(1) + 'K'; } },
-      { id: 'ocNvt', key: 'nvt_ratio', fmt: function(v) { return v.toFixed(1); } },
-    ];
+    var grid = $('#onchainGrid');
+    if (!grid || !data) return;
 
-    fields.forEach(function(f) {
-      var el = $('#' + f.id);
-      if (!el) return;
-      var valEl = el.querySelector('.oc-value');
-      var item = data[f.key];
-      if (valEl && item != null) {
-        valEl.textContent = typeof f.fmt === 'function' ? f.fmt(item.value != null ? item.value : item) : (item.value != null ? item.value : item);
-      }
-      var chgEl = el.querySelector('.oc-change');
-      if (chgEl && item && item.change != null) {
-        chgEl.textContent = deltaArrow(item.change) + ' ' + Math.abs(item.change).toFixed(2) + '%';
-        chgEl.className = 'oc-change ' + deltaClass(item.change);
-      }
-    });
+    var cards = [];
+    // Mempool
+    if (data.mempool) {
+      var mp = data.mempool;
+      cards.push({ label: 'MEMPOOL TXS', value: mp.tx_count.toLocaleString() });
+      cards.push({ label: 'MEMPOOL SIZE', value: mp.vsize_mb.toFixed(1) + ' MB' });
+      cards.push({ label: 'FEE (FAST)', value: mp.fee_fast + ' sat/vB' });
+      cards.push({ label: 'FEE (SLOW)', value: mp.fee_slow + ' sat/vB' });
+      cards.push({ label: 'CONGESTION', value: mp.congestion.toUpperCase() });
+    }
+    // Mining
+    if (data.mining) {
+      var m = data.mining;
+      cards.push({ label: 'HASHRATE', value: m.hashrate_eh.toFixed(1) + ' EH/s' });
+      cards.push({ label: 'BLOCK HEIGHT', value: m.latest_block_height.toLocaleString() });
+      cards.push({ label: 'DIFFICULTY', value: (m.difficulty / 1e12).toFixed(2) + 'T' });
+      cards.push({ label: 'NEXT ADJUST', value: (m.next_adjustment_pct >= 0 ? '+' : '') + m.next_adjustment_pct.toFixed(2) + '%' });
+      cards.push({ label: 'BLOCKS TO HALVING', value: m.blocks_until_halving.toLocaleString() });
+    }
+    // Lightning
+    if (data.lightning) {
+      var ln = data.lightning;
+      cards.push({ label: 'LN CAPACITY', value: ln.capacity_btc.toFixed(0) + ' BTC' });
+      cards.push({ label: 'LN CHANNELS', value: ln.channel_count.toLocaleString() });
+      cards.push({ label: 'LN NODES', value: ln.node_count.toLocaleString() });
+    }
+
+    grid.innerHTML = cards.map(function(c) {
+      return '<div class="deriv-card">' +
+        '<div class="deriv-label">' + c.label + '</div>' +
+        '<div class="deriv-value">' + c.value + '</div>' +
+        '</div>';
+    }).join('');
   }
 
   // ============================================
