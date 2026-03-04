@@ -2080,7 +2080,7 @@
         var tx = txs[i];
         var hash = tx.hash || tx.txid || tx.tx_hash || '';
         var amount = tx.result != null ? (tx.result / 1e8) : (tx.value != null ? (tx.value / 1e8) : null);
-        var confs = tx.confirmations != null ? tx.confirmations : (tx.block_height != null ? '\u2713' : 'pending');
+        var confs = tx.confirmations != null ? tx.confirmations : (tx.block_height != null ? '✓' : 'pending');
         var timeStr = '';
         if (tx.time || tx.confirmed) {
           try {
@@ -2089,7 +2089,7 @@
           } catch(ex) {}
         }
         html += '<div class="addr-tx-item">' +
-          '<span class="addr-tx-hash">' + escapeHtml(hash.slice(0, 16) + '\u2026' + hash.slice(-8)) + '</span>' +
+          '<span class="addr-tx-hash">' + escapeHtml(hash.slice(0, 16) + '…' + hash.slice(-8)) + '</span>' +
           (amount != null ? '<span class="addr-tx-amount ' + (amount >= 0 ? 'funding-positive' : 'funding-negative') + '">' + (amount >= 0 ? '+' : '') + amount.toFixed(6) + ' BTC</span>' : '<span></span>') +
           '<span class="addr-tx-conf">' + confs + '</span>' +
           '<span class="addr-tx-time">' + escapeHtml(timeStr) + '</span>' +
@@ -2288,6 +2288,104 @@
   // ============================================
   // INITIALIZATION
   // ============================================
+
+  // ============================================
+  // MOBILE NAVIGATION
+  // ============================================
+  function initMobileNav() {
+    var mobileNav = $('#mobileNav');
+    var moreBtn = $('#mobileMoreBtn');
+    var moreMenu = $('#mobileMoreMenu');
+    if (!mobileNav) return;
+
+    // Track open state
+    var moreOpen = false;
+
+    function closeMobileMore() {
+      if (!moreOpen) return;
+      moreOpen = false;
+      if (moreMenu) moreMenu.classList.remove('open');
+      var backdrop = document.querySelector('.mobile-more-backdrop');
+      if (backdrop) backdrop.remove();
+    }
+
+    function openMobileMore() {
+      moreOpen = true;
+      if (moreMenu) {
+        moreMenu.style.display = 'block';
+        // Force reflow for transition
+        void moreMenu.offsetHeight;
+        moreMenu.classList.add('open');
+      }
+      // Add backdrop
+      var backdrop = document.createElement('div');
+      backdrop.className = 'mobile-more-backdrop';
+      backdrop.addEventListener('click', closeMobileMore);
+      document.body.appendChild(backdrop);
+    }
+
+    if (moreBtn) {
+      moreBtn.addEventListener('click', function() {
+        if (moreOpen) { closeMobileMore(); } else { openMobileMore(); }
+      });
+    }
+
+    // Handle nav button clicks (both bottom nav and more menu)
+    function handleMobileNav(navTarget) {
+      closeMobileMore();
+
+      // Update active state on bottom nav
+      mobileNav.querySelectorAll('.mobile-nav-btn[data-nav]').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.nav === navTarget);
+      });
+
+      // Map nav targets to panel selectors and scroll targets
+      var panelMap = {
+        'dashboard': '#priceHero',
+        'chart': '#chartPanel',
+        'orderbook': '#orderbookPanel',
+        'watchlist': '#watchlistPanel',
+        'news': '#newsPanel',
+        'odds': '#polymarketPanel',
+        'derivatives': '#derivativesPanel',
+        'onchain': '#onchainPanel',
+        'macro': '#macroPanel',
+        'calendar': '#calendarPanel',
+        'address': '#addressPanel',
+        'notebook': '#notebookPanel'
+      };
+
+      var sel = panelMap[navTarget];
+      if (!sel) return;
+
+      var el = $(sel);
+      if (!el) return;
+
+      // Show hidden panels
+      if (el.style.display === 'none') {
+        el.style.display = '';
+      }
+
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // Bottom nav buttons
+    mobileNav.querySelectorAll('.mobile-nav-btn[data-nav]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        handleMobileNav(btn.dataset.nav);
+      });
+    });
+
+    // More menu items
+    if (moreMenu) {
+      moreMenu.querySelectorAll('[data-nav]').forEach(function(item) {
+        item.addEventListener('click', function() {
+          handleMobileNav(item.dataset.nav);
+        });
+      });
+    }
+  }
+
   function init() {
     // Init chart with requestAnimationFrame for proper dimensions
     initChart();
@@ -2314,6 +2412,9 @@
     loadVolatility();
     loadCalendar();
     loadNotebook();
+
+    // Mobile navigation
+    initMobileNav();
 
     // Try WebSockets (may be blocked in sandbox)
     setTimeout(function() {
