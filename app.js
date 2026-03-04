@@ -138,7 +138,7 @@
   // ============================================
   // NEWS TICKER + LIVE FEED (F06)
   // ============================================
-  var CGI_BIN = '__CGI_BIN__';
+  var CGI_BIN = '/cgi-bin';
 
   // Fallback headlines when CGI is unavailable
   var fallbackHeadlines = [
