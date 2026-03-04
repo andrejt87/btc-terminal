@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
 """
 BTC Bloomberg Terminal — Macro Data Proxy
-Cross-asset macro data: DXY proxy, Gold, S&P500, Stablecoin dominance,
-Fear & Greed Index, USDC/USDT market caps, BTC dominance.
-Cache: 5 minutes
+Cross-asset macro data: DXY proxy (via EUR/USD), gold, stablecoin supply,
+Fear & Greed Index, and BTC 30-day daily closes.
+Cache: 300s (5 minutes)
 """
+
+import sys as _sys
+import os as _os
+# Prevent cgi-bin/calendar.py from shadowing stdlib calendar module
+_cgi_dir = _os.path.dirname(_os.path.abspath(__file__))
+for _p in [_cgi_dir]:
+    while _p in _sys.path:
+        _sys.path.remove(_p)
+del _cgi_dir, _os
+
 
 import json
 import os
@@ -18,6 +28,7 @@ CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mac
 CACHE_TTL = 300  # 5 minutes
 
 
+# ─── Cache helpers ────────────────────────────────────────────────
 def load_cache():
     try:
         if os.path.exists(CACHE_FILE):
@@ -38,126 +49,159 @@ def save_cache(payload):
         pass
 
 
-def fetch_json(url):
+def fetch_json(url, headers=None):
     try:
-        req = Request(url, headers={"User-Agent": USER_AGENT})
+        h = {"User-Agent": USER_AGENT}
+        if headers:
+            h.update(headers)
+        req = Request(url, headers=h)
         with urlopen(req, timeout=TIMEOUT) as resp:
             return json.loads(resp.read())
     except Exception:
         return None
 
 
-# ─── Fear & Greed ─────────────────────────────────────────────────
-def get_fear_greed():
-    data = fetch_json("https://api.alternative.me/fng/?limit=7&format=json")
+# ─── DXY Proxy (EUR/USD inverted) ────────────────────────────────
+def get_dxy_proxy():
+    """
+    EUR/USD from Binance (EURUSDT). DXY is roughly 57.6% EUR-weighted.
+    Simple estimate: DXY ≈ 103 / (EUR/USD / 1.08) — rough inverse scaling.
+    """
+    data = fetch_json("https://data-api.binance.vision/api/v3/ticker/24hr?symbol=EURUSDT")
     if not data:
         return None
     try:
-        entries = data.get("data", [])
-        if not entries:
+        eur_usd = float(data.get("lastPrice", 0))
+        change_pct = float(data.get("priceChangePercent", 0))
+        if eur_usd == 0:
             return None
-        current = entries[0]
-        history = []
-        for e in entries[1:8]:
-            history.append({
-                "value": int(e.get("value", 0)),
-                "label": e.get("value_classification", ""),
-                "ts": int(e.get("timestamp", 0)),
-            })
+        # DXY rough estimate: inverted EUR/USD scaled to ~DXY range
+        # When EUR/USD = 1.08, DXY ≈ 103. Approx: DXY = 103 * (1.08 / EUR_USD)
+        dxy_est = round(103.0 * (1.08 / eur_usd), 2)
+        # DXY change is roughly inverse of EUR/USD change
+        dxy_change = round(-change_pct, 3)
         return {
+            "eur_usd": round(eur_usd, 5),
+            "eur_usd_change_24h": round(change_pct, 3),
+            "dxy_est": dxy_est,
+            "dxy_change_est": dxy_change,
+        }
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+# ─── Gold ─────────────────────────────────────────────────────────
+def get_gold():
+    """Try XAUUSDT on Binance first, fall back to CoinGecko tether-gold."""
+    data = fetch_json("https://data-api.binance.vision/api/v3/ticker/24hr?symbol=XAUUSDT")
+    if data and data.get("lastPrice"):
+        try:
+            price = float(data["lastPrice"])
+            if price > 100:  # sanity check
+                change_pct = float(data.get("priceChangePercent", 0))
+                return {
+                    "price": round(price, 2),
+                    "change_24h": round(change_pct, 3),
+                    "source": "binance",
+                }
+        except (TypeError, ValueError):
+            pass
+
+    # Fallback: CoinGecko tether-gold
+    cg_data = fetch_json(
+        "https://api.coingecko.com/api/v3/simple/price"
+        "?ids=tether-gold&vs_currencies=usd&include_24hr_change=true"
+    )
+    if cg_data and "tether-gold" in cg_data:
+        entry = cg_data["tether-gold"]
+        try:
+            price = float(entry.get("usd", 0))
+            change = float(entry.get("usd_24h_change", 0))
+            return {
+                "price": round(price, 2),
+                "change_24h": round(change, 3),
+                "source": "coingecko",
+            }
+        except (TypeError, ValueError):
+            pass
+
+    return None
+
+
+# ─── Stablecoin Supply ────────────────────────────────────────────
+def get_stablecoins():
+    data = fetch_json(
+        "https://api.coingecko.com/api/v3/coins/markets"
+        "?vs_currency=usd&ids=tether,usd-coin,dai,first-digital-usd"
+        "&order=market_cap_desc&per_page=10&page=1"
+    )
+    if not data or not isinstance(data, list):
+        return None
+
+    result = {}
+    total_mcap = 0
+    for coin in data:
+        try:
+            symbol_map = {
+                "tether": "tether",
+                "usd-coin": "usdc",
+                "dai": "dai",
+                "first-digital-usd": "fdusd",
+            }
+            cid = coin.get("id", "")
+            key = symbol_map.get(cid, cid)
+            mcap = float(coin.get("market_cap", 0) or 0)
+            change = float(coin.get("price_change_percentage_24h", 0) or 0)
+            total_mcap += mcap
+            result[key] = {
+                "mcap": round(mcap, 0),
+                "change_24h": round(change, 4),
+                "price": float(coin.get("current_price", 1)),
+            }
+        except (TypeError, ValueError):
+            continue
+
+    return {"total_mcap": round(total_mcap, 0), **result}
+
+
+# ─── Fear & Greed Index ───────────────────────────────────────────
+def get_fear_greed():
+    data = fetch_json("https://api.alternative.me/fng/?limit=2")
+    if not data:
+        return None
+    items = data.get("data", [])
+    if not items:
+        return None
+    try:
+        current = items[0]
+        result = {
             "value": int(current.get("value", 0)),
             "label": current.get("value_classification", ""),
-            "ts": int(current.get("timestamp", 0)),
-            "history": history,
+            "timestamp": int(current.get("timestamp", 0)),
         }
-    except Exception:
+        if len(items) > 1:
+            result["yesterday"] = int(items[1].get("value", 0))
+            result["yesterday_label"] = items[1].get("value_classification", "")
+        return result
+    except (TypeError, ValueError):
         return None
 
 
-# ─── CoinGecko Global ─────────────────────────────────────────────
-def get_coingecko_global():
-    data = fetch_json("https://api.coingecko.com/api/v3/global")
-    if not data:
-        return None
-    try:
-        d = data.get("data", {})
-        market_cap = d.get("total_market_cap", {})
-        volume_24h = d.get("total_volume", {})
-        dominance = d.get("market_cap_percentage", {})
-        return {
-            "total_market_cap_usd": market_cap.get("usd"),
-            "total_volume_24h_usd": volume_24h.get("usd"),
-            "btc_dominance": round(dominance.get("btc", 0), 2),
-            "eth_dominance": round(dominance.get("eth", 0), 2),
-            "active_cryptos": d.get("active_cryptocurrencies"),
-            "market_cap_change_24h": round(d.get("market_cap_change_percentage_24h_usd", 0), 2),
-        }
-    except Exception:
-        return None
-
-
-# ─── Stablecoin data from CoinGecko ──────────────────────────────
-def get_stablecoins():
-    # Fetch top stablecoins by market cap
-    url = ("https://api.coingecko.com/api/v3/coins/markets"
-           "?vs_currency=usd&category=stablecoins&order=market_cap_desc&per_page=5")
+# ─── BTC 30-day daily closes ──────────────────────────────────────
+def get_btc_30d_daily():
+    """Fetch 30 daily BTC closes from Binance klines."""
+    url = (
+        "https://data-api.binance.vision/api/v3/klines"
+        "?symbol=BTCUSDT&interval=1d&limit=30"
+    )
     data = fetch_json(url)
     if not data or not isinstance(data, list):
         return None
     try:
-        coins = []
-        for c in data[:5]:
-            coins.append({
-                "id": c.get("id"),
-                "symbol": c.get("symbol", "").upper(),
-                "name": c.get("name"),
-                "market_cap": c.get("market_cap"),
-                "price": c.get("current_price"),
-                "price_change_24h": round(c.get("price_change_percentage_24h") or 0, 4),
-            })
-        total_stable_cap = sum(c["market_cap"] or 0 for c in coins)
-        return {
-            "coins": coins,
-            "total_top5_market_cap": total_stable_cap,
-        }
-    except Exception:
-        return None
-
-
-# ─── Cross-asset prices via CoinGecko (no auth needed) ────────────
-def get_cross_asset():
-    """
-    Use CoinGecko to get proxies for:
-    - Gold (paxg as gold-linked token proxy)
-    - S&P 500 (not directly available — skip or use wrapped)
-    - DXY (not directly available on free CG)
-    We get: Gold via PAXG, ETH/BTC ratio, BTC/USD, ETH/USD.
-    """
-    ids = "pax-gold,bitcoin,ethereum,wrapped-bitcoin"
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true"
-    data = fetch_json(url)
-    if not data:
-        return None
-    try:
-        result = {}
-        if "pax-gold" in data:
-            pg = data["pax-gold"]
-            result["gold_proxy_price"] = pg.get("usd")
-            result["gold_proxy_change_24h"] = round(pg.get("usd_24h_change") or 0, 2)
-            result["gold_proxy_symbol"] = "PAXG"
-        if "bitcoin" in data:
-            btc = data["bitcoin"]
-            result["btc_usd"] = btc.get("usd")
-            result["btc_change_24h"] = round(btc.get("usd_24h_change") or 0, 2)
-        if "ethereum" in data:
-            eth = data["ethereum"]
-            result["eth_usd"] = eth.get("usd")
-            result["eth_change_24h"] = round(eth.get("usd_24h_change") or 0, 2)
-        # ETH/BTC ratio
-        if result.get("btc_usd") and result.get("eth_usd"):
-            result["eth_btc_ratio"] = round(result["eth_usd"] / result["btc_usd"], 6)
-        return result
-    except Exception:
+        # Kline format: [open_time, open, high, low, close, volume, ...]
+        closes = [round(float(k[4]), 2) for k in data]
+        return closes
+    except (TypeError, ValueError, IndexError):
         return None
 
 
@@ -171,16 +215,18 @@ def main():
         print(json.dumps(cached))
         return
 
-    fear_greed = get_fear_greed()
-    global_data = get_coingecko_global()
+    dxy_proxy = get_dxy_proxy()
+    gold = get_gold()
     stablecoins = get_stablecoins()
-    cross_asset = get_cross_asset()
+    fear_greed = get_fear_greed()
+    btc_30d_daily = get_btc_30d_daily()
 
     payload = {
-        "fear_greed": fear_greed,
-        "global": global_data,
+        "dxy_proxy": dxy_proxy,
+        "gold": gold,
         "stablecoins": stablecoins,
-        "cross_asset": cross_asset,
+        "fear_greed": fear_greed,
+        "btc_30d_daily": btc_30d_daily,
         "fetched_at": int(time.time()),
     }
 

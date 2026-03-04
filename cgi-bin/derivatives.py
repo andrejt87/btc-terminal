@@ -189,7 +189,7 @@ def get_deribit_oi():
         return None
 
 
-# ─── Basis (Spot vs Perp) ────────────────────────────────────────
+# ─── Basis (Spot vs Perp) ─────────────────────────────────────────
 def get_basis(spot_price):
     """Calculate basis from Deribit BTC-PERPETUAL mark price vs spot."""
     if not spot_price:

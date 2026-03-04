@@ -204,7 +204,7 @@ def get_status():
     respond(info)
 
 
-# ─── Main CGI Handler ───────────────────────────────────────────────────────
+# ─── Main CGI Handler ─────────────────────────────────────────────
 def main():
     qs = os.environ.get("QUERY_STRING", "")
     params = parse_qs(qs)

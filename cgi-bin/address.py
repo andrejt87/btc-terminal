@@ -33,7 +33,7 @@ MAX_CACHE_ENTRIES = 100  # prevent unbounded growth
 MEMPOOL_BASE = "https://mempool.space/api"
 
 
-# ─── Cache helpers (keyed by query string) ────────────────────────────
+# ─── Cache helpers (keyed by query string) ────────────────────────
 def load_cache(query_key):
     try:
         if os.path.exists(CACHE_FILE):
@@ -79,7 +79,7 @@ def fetch_json(url):
         return None
 
 
-# ─── Query type detection ───────────────────────────────────────────
+# ─── Query type detection ─────────────────────────────────────────
 def looks_like_txid(s):
     """A txid is a 64-character hex string."""
     return bool(re.fullmatch(r"[0-9a-fA-F]{64}", s))
@@ -170,7 +170,7 @@ def lookup_address(addr):
     return result
 
 
-# ─── Transaction lookup ─────────────────────────────────────────────
+# ─── Transaction lookup ───────────────────────────────────────────
 def lookup_tx(txid):
     tx_data = fetch_json(f"{MEMPOOL_BASE}/tx/{txid}")
 

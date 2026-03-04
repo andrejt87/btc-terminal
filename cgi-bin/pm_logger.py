@@ -22,7 +22,7 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from datetime import datetime, timezone
 
-# ─── Config ─────────────────────────────────────────────────────────────────
+# ─── Config ─────────────────────────────────────────────────────────
 POLL_INTERVAL = 30  # seconds between polls
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 TIMEOUT = 10
@@ -43,7 +43,7 @@ MARKET_SLUGS = [
     "when-will-bitcoin-hit-150k",
 ]
 
-# ─── Database ───────────────────────────────────────────────────────────────
+# ─── Database ────────────────────────────────────────────────────────
 def init_db():
     """Create database and tables if they don't exist."""
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -132,7 +132,7 @@ def upsert_last_value(conn, market_slug, outcome, probability, volume, liquidity
     """, (market_slug, outcome, probability, volume, liquidity, event_slug, event_title, market_question, ts))
 
 
-# ─── Fetch ──────────────────────────────────────────────────────────────────
+# ─── Fetch ──────────────────────────────────────────────────────────
 def fetch_event(slug):
     """Fetch a single event by slug from Gamma API."""
     url = f"{GAMMA_BASE}/events?slug={slug}"
@@ -167,13 +167,13 @@ def parse_outcomes(market):
     return result
 
 
-# ─── Logging ────────────────────────────────────────────────────────────────
+# ─── Logging ─────────────────────────────────────────────────────────
 def log(msg):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{ts}] {msg}", flush=True)
 
 
-# ─── Poll Cycle ─────────────────────────────────────────────────────────────
+# ─── Poll Cycle ─────────────────────────────────────────────────────
 def poll_once(conn):
     """Run one full poll cycle: fetch all markets, log all outcomes, gap-fill missing ones."""
     now_ts = int(time.time())
@@ -237,7 +237,7 @@ def poll_once(conn):
     log(f"Logged {logged_count} values, gap-filled {gap_count}")
 
 
-# ─── Main Loop ──────────────────────────────────────────────────────────────
+# ─── Main Loop ───────────────────────────────────────────────────────
 def run():
     log("=== Polymarket Logger starting ===")
     log(f"DB: {DB_PATH}")

@@ -62,7 +62,7 @@ def fetch_json(url, headers=None):
         return None
 
 
-# ─── Realized Volatility ───────────────────────────────────────────
+# ─── Realized Volatility ─────────────────────────────────────────
 def calc_realized_vol(closes):
     """
     Calculate annualized realized volatility from a list of closing prices.
